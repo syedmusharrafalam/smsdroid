@@ -28,15 +28,20 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
+import android.database.MergeCursor;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.preference.PreferenceManager;
 import android.provider.CallLog.Calls;
 import android.support.annotation.Nullable;
 import android.support.v4.app.FragmentActivity;
 import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.LinearLayoutManager;
+import android.support.v7.widget.RecyclerView;
 import android.text.ClipboardManager;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -46,6 +51,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.View.OnLongClickListener;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemClickListener;
@@ -58,9 +64,25 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.android.volley.Request;
+import com.android.volley.RequestQueue;
+import com.android.volley.Response;
+import com.android.volley.VolleyError;
+import com.android.volley.toolbox.JsonObjectRequest;
+import com.android.volley.toolbox.StringRequest;
+import com.android.volley.toolbox.Volley;
 import com.google.android.gms.ads.AdListener;
 import com.google.android.gms.ads.AdRequest;
 import com.google.android.gms.ads.AdView;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import de.ub0r.android.lib.Utils;
 import de.ub0r.android.lib.apis.Contact;
@@ -76,6 +98,13 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
         OnItemLongClickListener, OnClickListener, OnLongClickListener {
 
     private static final String TAG = "ml";
+    RecyclerView suggestRecyclerView;
+    RecyclerView intentRecyclerView;
+    RequestQueue queue;
+    LoadSms loadsmsTask;
+    private Handler handler = new Handler();
+    ArrayList<String> tmpList=new ArrayList<>();
+    ArrayList<String> smsList = new ArrayList<>();
 
     /**
      * {@link ContactsWrapper}.
@@ -222,10 +251,217 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
     }
 
     private AdView mAdView;
+    int cond=0;
+    ArrayList<String> suggestArray;
+    ArrayList<String> intentArray;
+    String title;
+    SuggestAdapter suggestAdapter;
+
+    public void putRequest(String url, String message) {
+        if (cond == 1) {
+            intentArray = new ArrayList<>();
+            queue = Volley.newRequestQueue(this);
+            JsonObjectRequest getRequest = new JsonObjectRequest(Request.Method.GET, url, null,
+                    new Response.Listener<JSONObject>() {
+                        @Override
+                        public void onResponse(JSONObject response) {
+                            // display response
+                            android.util.Log.d("Response", response.toString());
+
+                            try {
+
+                                JSONArray jsonArray = response.getJSONArray("intents");
+                                for (int i = 0; i < jsonArray.length(); i++) {
+                                    //JSONObject jsonObject =jsonArray.getJSONObject(i);
+                                    title = jsonArray.getString(i);
+                                    intentRecyclerView.setVisibility(View.VISIBLE);
+                                    intentRecyclerView.setLayoutManager(new LinearLayoutManager(getApplicationContext(), LinearLayoutManager.HORIZONTAL, false));
+                                    suggestAdapter = new SuggestAdapter(getApplicationContext(), intentArray);
+                                    intentRecyclerView.setAdapter(suggestAdapter);
+                                }
+                                //myArray.add("search");
+                            } catch (JSONException e) {
+                                e.printStackTrace();
+                            }
+
+                        }
+                    },
+                    new Response.ErrorListener() {
+                        @Override
+                        public void onErrorResponse(VolleyError error) {
+                            android.util.Log.d("Error.Response", error.toString());
+                        }
+                    }
+            );
+
+// add it to the RequestQueue
+            queue.add(getRequest);
+        } else {
+            if (cond == 2) {
+                suggestArray = new ArrayList<>();
+                final String mess = message;
+                View view = MessageListActivity.this.getCurrentFocus();
+                InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
+                queue = Volley.newRequestQueue(this);
+                StringRequest postRequest = new StringRequest(Request.Method.POST, url,
+                        new Response.Listener<String>() {
+                            @Override
+                            public void onResponse(String response) {
+                                // response
+                                android.util.Log.d("Response", response.toString());
+                                try {
+                                    JSONObject jsonObject = new JSONObject(response);
+                                    ;
+                                    JSONArray jsonArray = jsonObject.getJSONArray("suggestions");
+                                    for (int i = 0; i < jsonArray.length(); i++) {
+                                        title = jsonArray.getString(i);
+                                        suggestArray.add(title);
+                                    }
+                                    suggestArray.add("search");
+                                } catch (JSONException e) {
+                                    e.printStackTrace();
+                                }
+                                suggestRecyclerView.setVisibility(View.VISIBLE);
+                                suggestRecyclerView.setLayoutManager(new LinearLayoutManager(getApplicationContext(), LinearLayoutManager.HORIZONTAL, false));
+                                suggestAdapter = new SuggestAdapter(getApplicationContext(), suggestArray);
+                                suggestRecyclerView.setAdapter(suggestAdapter);
+
+                            }
+                        },
+                        new Response.ErrorListener() {
+                            @Override
+                            public void onErrorResponse(VolleyError error) {
+                                // error
+                                android.util.Log.d("Error.Response", error.toString());
+
+                            }
+                        }
+                ) {
+                    @Override
+                    protected Map<String, String> getParams() {
+                        Map<String, String> params = new HashMap<String, String>();
+
+                        params.put("intentName", mess);
+
+
+                        return params;
+                    }
+                };
+                queue.add(postRequest);
+
+            } else {
+
+                int number = conv.getThreadId();
+                suggestArray = new ArrayList<String>();
+                Uri uriInbox = Uri.parse("content://sms/inbox");
+                Cursor inbox = getContentResolver().query(uriInbox, null, "thread_id=" + number , null, null);
+                if (inbox.moveToFirst()) {
+                    for (int i = 0; i < inbox.getCount(); i++) {
+                        String msg = inbox.getString(inbox.getColumnIndexOrThrow("body"));
+                        suggestArray.add(msg);
+                        inbox.moveToNext();
+                    }
+                    inbox.close();
+                    final String mess = suggestArray.get(0);
+                    queue = Volley.newRequestQueue(this);
+                    StringRequest postRequest = new StringRequest(Request.Method.POST, url,
+                            new Response.Listener<String>() {
+                                @Override
+                                public void onResponse(String response) {
+                                    // response
+                                    android.util.Log.d("Response", response.toString());
+                                  //  Toast.makeText(getApplicationContext(),response,Toast.LENGTH_LONG).show();
+                                    suggestArray.clear();
+                                    try {
+                                        JSONObject jsonObject = new JSONObject(response);
+                                        JSONArray jsonArray = jsonObject.getJSONArray("suggestions");
+                                        for (int i = 0; i < jsonArray.length(); i++) {
+                                            title = jsonArray.getString(i);
+                                            suggestArray.add(title);
+                                        }
+                                        suggestArray.add("search");
+
+                                    } catch (JSONException e) {
+                                        e.printStackTrace();
+                                    }
+                                    suggestRecyclerView.setLayoutManager(new LinearLayoutManager(MessageListActivity.this, LinearLayoutManager.HORIZONTAL, false));
+
+                                    suggestAdapter = new SuggestAdapter(MessageListActivity.this, suggestArray);
+
+                                    suggestRecyclerView.setAdapter(suggestAdapter);
+                                    suggestRecyclerView.setVisibility(View.VISIBLE);
+                                    //textView.setBackgroundColor(Color.parseColor("#a1d7ff"));
+
+                                    //suggestRecyclerView.setVisibility(View.VISIBLE);
+                                    suggestRecyclerView.addOnItemTouchListener(
+                                            new RecyclerItemClickListener(MessageListActivity.this, suggestRecyclerView, new RecyclerItemClickListener.OnItemClickListener() {
+                                                @Override
+                                                public void onItemClick(View view, int position) {
+                                                    String text = suggestArray.get(position).toString();
+
+                                                    if (text.equals("search")) {
+                                                        cond = 1;
+                                                        putRequest("https://us-central1-callmana-68c75.cloudfunctions.net/getAllIntents", "abc");
+//                                                        new_message.setVisibility(View.GONE);
+//                                                        send_message.setVisibility(View.GONE);
+//                                                        intents.setVisibility(View.VISIBLE);
+//                                                        recyclerView.setVisibility(View.GONE);
+
+
+                                                    } else {
+                                                        //new_message.setText(text);
+                                                    }
+
+                                                    // do whatever
+                                                }
+
+                                                @Override
+                                                public void onLongItemClick(View view, int position) {
+                                                    // do whatever
+                                                }
+                                            })
+                                    );
+
+
+                                }
+                            },
+                            new Response.ErrorListener() {
+                                @Override
+                                public void onErrorResponse(VolleyError error) {
+                                    // error
+                                    android.util.Log.d("Error.Response", error.toString());
+                                    Toast.makeText(MessageListActivity.this, "Poor internet connection", Toast.LENGTH_LONG).show();
+                                }
+                            }
+                    ) {
+                        @Override
+                        protected Map<String, String> getParams() {
+                            Map<String, String> params = new HashMap<String, String>();
+
+                            params.put("message", mess);
+
+
+                            return params;
+                        }
+                    };
+                    queue.add(postRequest);
+
+
+                }
+            }
+
+
+        }
+
+
+    }
+
 
     @Override
     public final void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+     ;
         final SharedPreferences p = PreferenceManager.getDefaultSharedPreferences(this);
         enableAutosend = p.getBoolean(PreferencesActivity.PREFS_ENABLE_AUTOSEND, true);
         showTextField = enableAutosend
@@ -288,17 +524,99 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
         mAdView.setVisibility(View.GONE);
         ConsentManager cm = new ConsentManager(this);
         cm.updateConsent();
-        if (cm.showAds()) {
-            mAdView.loadAd(new AdRequest.Builder().build());
-            mAdView.setAdListener(new AdListener() {
-                @Override
-                public void onAdLoaded() {
-                    mAdView.setVisibility(View.VISIBLE);
-                    super.onAdLoaded();
+
+        suggestRecyclerView = (RecyclerView) findViewById(R.id.suggestRecyclerView);
+        intentRecyclerView = (RecyclerView) findViewById(R.id.intentRecyclerView);
+        suggestRecyclerView.setVisibility(View.GONE);
+        startLoadingSms();
+
+
+    }
+
+    class LoadSms extends AsyncTask<String, Void, String> {
+
+        @Override
+        protected void onPreExecute() {
+            super.onPreExecute();
+            tmpList.clear();
+        }
+
+        @Override
+        protected String doInBackground(String... strings) {
+            String xml = "";
+
+            try {
+                Uri uriInbox = Uri.parse("content://sms/inbox");
+                Cursor inbox = getContentResolver().query(uriInbox, null, "thread_id=" + conv.getThreadId(), null, null);
+                Uri uriSent = Uri.parse("content://sms/sent");
+                Cursor sent = getContentResolver().query(uriSent, null, "thread_id=" + conv.getThreadId(), null, null);
+                Cursor c = new MergeCursor(new Cursor[]{inbox, sent}); // Attaching inbox and sent sms
+
+
+                if (c.moveToFirst()) {
+                    for (int i = 0; i < c.getCount(); i++) {
+
+
+                        String msg = c.getString(c.getColumnIndexOrThrow("body"));
+
+
+                        tmpList.add(msg);
+                        c.moveToNext();
+                        // Log.d("doInBackground:",tmpList.toString());
+//                        if(i==0){
+//                             current=msg;
+//                             putRequest(current);
+//                        }
+                    }
+
                 }
-            });
+                c.close();
+
+            } catch (IllegalArgumentException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+
+
+            return xml;
+        }
+
+        @Override
+        protected void onPostExecute(String s) {
+            if (!tmpList.equals(smsList)) {
+             cond=0;
+                putRequest("https://us-central1-callmana-68c75.cloudfunctions.net/getSuggestions","hs");
+                smsList.clear();
+                smsList.addAll(tmpList);
+
+            }
         }
     }
+
+    public void startLoadingSms() {
+        final Runnable r = new Runnable() {
+            public void run() {
+
+                loadsmsTask = new LoadSms();
+                loadsmsTask.execute();
+
+                handler.postDelayed(this, 5000);
+            }
+        };
+        handler.postDelayed(r, 0);
+    }
+
+
+
+
+
+
+
+
+
+
+
+
 
     @Override
     protected final void onNewIntent(final Intent intent) {
@@ -385,6 +703,7 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
 
     private void updateHeader(final Contact contact) {
         String displayName = contact.getDisplayName();
+
         setTitle(displayName);
         String number = contact.getNumber();
         if (displayName.equals(number)) {
