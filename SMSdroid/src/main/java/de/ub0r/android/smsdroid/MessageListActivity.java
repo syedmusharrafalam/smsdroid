@@ -1,18 +1,18 @@
 /*
  * Copyright (C) 2009-2015 Felix Bechstein
- * 
+ *
  * This file is part of SMSdroid.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License as published by the Free Software
  * Foundation; either version 3 of the License, or (at your option) any later
  * version.
- * 
+ *
  * This program is distributed in the hope that it will be useful, but WITHOUT
  * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  * FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
  * details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; If not, see <http://www.gnu.org/licenses/>.
  */
@@ -43,8 +43,10 @@ import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.text.ClipboardManager;
+import android.text.Editable;
 import android.text.InputType;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.text.format.DateFormat;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -103,8 +105,9 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
     RequestQueue queue;
     LoadSms loadsmsTask;
     private Handler handler = new Handler();
-    ArrayList<String> tmpList=new ArrayList<>();
+    ArrayList<String> tmpList = new ArrayList<>();
     ArrayList<String> smsList = new ArrayList<>();
+    ArrayList<String> filteredList;
 
     /**
      * {@link ContactsWrapper}.
@@ -195,6 +198,7 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
      * {@link EditText} holding text.
      */
     private EditText etText;
+    private EditText search;
 
     /**
      * {@link ClipboardManager}.
@@ -251,13 +255,14 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
     }
 
     private AdView mAdView;
-    int cond=0;
+    int cond = 0;
     ArrayList<String> suggestArray;
     ArrayList<String> intentArray;
     String title;
     SuggestAdapter suggestAdapter;
 
     public void putRequest(String url, String message) {
+        Button btnSent = (Button) findViewById(R.id.send_);
         if (cond == 1) {
             intentArray = new ArrayList<>();
             queue = Volley.newRequestQueue(this);
@@ -274,10 +279,12 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
                                 for (int i = 0; i < jsonArray.length(); i++) {
                                     //JSONObject jsonObject =jsonArray.getJSONObject(i);
                                     title = jsonArray.getString(i);
+                                    intentArray.add(title);
                                     intentRecyclerView.setVisibility(View.VISIBLE);
                                     intentRecyclerView.setLayoutManager(new LinearLayoutManager(getApplicationContext(), LinearLayoutManager.HORIZONTAL, false));
                                     suggestAdapter = new SuggestAdapter(getApplicationContext(), intentArray);
                                     intentRecyclerView.setAdapter(suggestAdapter);
+                                    filter("");
                                 }
                                 //myArray.add("search");
                             } catch (JSONException e) {
@@ -296,6 +303,35 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
 
 // add it to the RequestQueue
             queue.add(getRequest);
+            intentRecyclerView.addOnItemTouchListener(
+                    new RecyclerItemClickListener(MessageListActivity.this, intentRecyclerView, new RecyclerItemClickListener.OnItemClickListener() {
+                        @Override
+                        public void onItemClick(View view, int position) {
+                            String text;
+
+
+                            text = filteredList.get(position).toString();
+
+                            cond = 2;
+                            putRequest("https://us-central1-callmana-68c75.cloudfunctions.net/getSuggestionsByIntent", text);
+                            etText.setVisibility(View.VISIBLE);
+                            btnSent.setVisibility(View.VISIBLE);
+                            intentRecyclerView.setVisibility(View.GONE);
+                            search.setVisibility(View.GONE);
+                            // textView.setVisibility(View.GONE);
+
+
+                            // do whatever
+                        }
+
+                        @Override
+                        public void onLongItemClick(View view, int position) {
+                            // do whatever
+                        }
+                    })
+            );
+
+
         } else {
             if (cond == 2) {
                 suggestArray = new ArrayList<>();
@@ -327,6 +363,37 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
                                 suggestAdapter = new SuggestAdapter(getApplicationContext(), suggestArray);
                                 suggestRecyclerView.setAdapter(suggestAdapter);
 
+
+                                suggestRecyclerView.addOnItemTouchListener(
+                                        new RecyclerItemClickListener(MessageListActivity.this, suggestRecyclerView, new RecyclerItemClickListener.OnItemClickListener() {
+                                            @Override
+                                            public void onItemClick(View view, int position) {
+                                                String text = suggestArray.get(position).toString();
+                                                if (text.equals("search")) {
+                                                    cond = 1;
+                                                    putRequest("https://us-central1-callmana-68c75.cloudfunctions.net/getAllIntents", "abc");
+                                                    etText.setVisibility(View.GONE);
+                                                    btnSent.setVisibility(View.GONE);
+                                                    search.setVisibility(View.VISIBLE);
+                                                    suggestRecyclerView.setVisibility(View.GONE);
+
+
+                                                } else {
+                                                    etText.setText(text);
+                                                }
+
+                                                // do whatever
+                                            }
+
+                                            @Override
+                                            public void onLongItemClick(View view, int position) {
+                                                // do whatever
+                                            }
+                                        })
+
+                                );
+
+
                             }
                         },
                         new Response.ErrorListener() {
@@ -350,12 +417,13 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
                 };
                 queue.add(postRequest);
 
+
             } else {
 
                 int number = conv.getThreadId();
                 suggestArray = new ArrayList<String>();
                 Uri uriInbox = Uri.parse("content://sms/inbox");
-                Cursor inbox = getContentResolver().query(uriInbox, null, "thread_id=" + number , null, null);
+                Cursor inbox = getContentResolver().query(uriInbox, null, "thread_id=" + number, null, null);
                 if (inbox.moveToFirst()) {
                     for (int i = 0; i < inbox.getCount(); i++) {
                         String msg = inbox.getString(inbox.getColumnIndexOrThrow("body"));
@@ -371,7 +439,7 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
                                 public void onResponse(String response) {
                                     // response
                                     android.util.Log.d("Response", response.toString());
-                                  //  Toast.makeText(getApplicationContext(),response,Toast.LENGTH_LONG).show();
+                                    //  Toast.makeText(getApplicationContext(),response,Toast.LENGTH_LONG).show();
                                     suggestArray.clear();
                                     try {
                                         JSONObject jsonObject = new JSONObject(response);
@@ -403,14 +471,17 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
                                                     if (text.equals("search")) {
                                                         cond = 1;
                                                         putRequest("https://us-central1-callmana-68c75.cloudfunctions.net/getAllIntents", "abc");
-//                                                        new_message.setVisibility(View.GONE);
-//                                                        send_message.setVisibility(View.GONE);
+                                                        etText.setVisibility(View.GONE);
+                                                        btnSent.setVisibility(View.GONE);
+                                                        suggestRecyclerView.setVisibility(View.GONE);
+                                                        search.setVisibility(View.VISIBLE);
+
 //                                                        intents.setVisibility(View.VISIBLE);
 //                                                        recyclerView.setVisibility(View.GONE);
 
 
                                                     } else {
-                                                        //new_message.setText(text);
+                                                        etText.setText(text);
                                                     }
 
                                                     // do whatever
@@ -461,7 +532,7 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
     @Override
     public final void onCreate(final Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-     ;
+        ;
         final SharedPreferences p = PreferenceManager.getDefaultSharedPreferences(this);
         enableAutosend = p.getBoolean(PreferencesActivity.PREFS_ENABLE_AUTOSEND, true);
         showTextField = enableAutosend
@@ -484,6 +555,7 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
 
         cbmgr = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
         etText = (EditText) findViewById(R.id.text);
+        search = (EditText) findViewById(R.id.btnSearch);
         int flags = etText.getInputType();
         if (p.getBoolean(PreferencesActivity.PREFS_EDIT_SHORT_TEXT, true)) {
             flags |= InputType.TYPE_TEXT_VARIATION_SHORT_MESSAGE;
@@ -528,10 +600,52 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
         suggestRecyclerView = (RecyclerView) findViewById(R.id.suggestRecyclerView);
         intentRecyclerView = (RecyclerView) findViewById(R.id.intentRecyclerView);
         suggestRecyclerView.setVisibility(View.GONE);
-        startLoadingSms();
+        //startLoadingSms();
 
+        search.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                //filter("");
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+
+                filter(s.toString());
+            }
+        });
 
     }
+
+
+    private void filter(String s) {
+
+        // String userInput=s.toLowerCase();
+        filteredList = new ArrayList<>();
+
+        if (search != null) {
+            for (String item : intentArray) {
+                if (item.toLowerCase().startsWith(s.toLowerCase())) {
+
+                    filteredList.add(item);
+                }
+
+
+            }
+
+        } else {
+            filteredList = intentArray;
+        }
+
+
+        suggestAdapter.updateList(filteredList);
+    }
+
 
     class LoadSms extends AsyncTask<String, Void, String> {
 
@@ -584,8 +698,8 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
         @Override
         protected void onPostExecute(String s) {
             if (!tmpList.equals(smsList)) {
-             cond=0;
-                putRequest("https://us-central1-callmana-68c75.cloudfunctions.net/getSuggestions","hs");
+                cond = 0;
+                putRequest("https://us-central1-callmana-68c75.cloudfunctions.net/getSuggestions", "hs");
                 smsList.clear();
                 smsList.addAll(tmpList);
 
@@ -605,17 +719,6 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
         };
         handler.postDelayed(r, 0);
     }
-
-
-
-
-
-
-
-
-
-
-
 
 
     @Override
@@ -692,6 +795,7 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
         if (!TextUtils.isEmpty(body)) {
             etText.setText(body);
             showKeyboard = true;
+            // etText.requestFocus();
         }
 
         if (showKeyboard) {
@@ -886,6 +990,7 @@ public class MessageListActivity extends AppCompatActivity implements OnItemClic
         if (conv != null) {
             ConversationListActivity.markRead(this, conv.getUri(), 1);
         }
+        startLoadingSms();
     }
 
     @Override

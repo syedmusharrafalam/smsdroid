@@ -166,7 +166,7 @@ public class SmsReceiver extends BroadcastReceiver {
         final String action = intent.getAction();
         Log.d(TAG, "onReceive(context, ", action, ")");
         final PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-        final PowerManager.WakeLock wakelock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, TAG);
+        @SuppressLint("InvalidWakeLockTag") final PowerManager.WakeLock wakelock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, TAG);
         wakelock.acquire();
         Log.i(TAG, "got wakelock");
         Log.d(TAG, "got intent: ", action);
